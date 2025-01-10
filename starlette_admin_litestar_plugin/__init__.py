@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-import sqladmin
 from litestar import asgi
 from litestar.plugins.base import InitPluginProtocol
 from litestar.types.empty import Empty
 from litestar.utils.empty import value_or_default
 from starlette.applications import Starlette
+from starlette_admin.contrib.sqla import Admin
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -16,24 +16,24 @@ if TYPE_CHECKING:
     from litestar.config.app import AppConfig
     from litestar.types.asgi_types import Receive, Scope, Send
     from litestar.types.empty import EmptyType
-    from sqladmin import ModelView
-    from sqladmin.authentication import AuthenticationBackend
     from sqlalchemy.engine import Engine
     from sqlalchemy.ext.asyncio import AsyncEngine
     from sqlalchemy.orm import sessionmaker
     from starlette import types as st_types
     from starlette.middleware import Middleware
+    from starlette_admin.auth import AuthProvider
+    from starlette_admin.contrib.sqla import ModelView
 
-__all__ = ("SQLAdminPlugin",)
+__all__ = ("StarletteAdminPlugin",)
 
 logger = logging.getLogger(__name__)
 
 
-class SQLAdminPlugin(InitPluginProtocol):
+class StarletteAdminPlugin(InitPluginProtocol):
     def __init__(  # noqa: PLR0913
         self,
         *,
-        views: Sequence[type[ModelView]] | EmptyType = Empty,
+        views: Sequence[ModelView] | EmptyType = Empty,
         engine: Engine | AsyncEngine | EmptyType = Empty,
         sessionmaker: sessionmaker[Any] | EmptyType = Empty,
         base_url: str | EmptyType = Empty,
@@ -41,7 +41,7 @@ class SQLAdminPlugin(InitPluginProtocol):
         logo_url: str | EmptyType = Empty,
         templates_dir: str | EmptyType = Empty,
         middlewares: Sequence[Middleware] | EmptyType = Empty,
-        authentication_backend: AuthenticationBackend | EmptyType = Empty,
+        auth_provider: AuthProvider | EmptyType = Empty,
     ) -> None:
         """Initializes the SQLAdminPlugin.
 
@@ -54,7 +54,7 @@ class SQLAdminPlugin(InitPluginProtocol):
             logo_url: The URL of the logo to display in the admin app.
             templates_dir: The directory containing the Jinja2 templates for the admin app.
             middlewares: A sequence of Starlette middlewares to add to the admin app.
-            authentication_backend: An authentication backend to use for the admin app.
+            auth_provider: An authentication provider to use for the admin app.
         """
         self.views = list(value_or_default(views, []))
         admin_kwargs = {
@@ -67,16 +67,17 @@ class SQLAdminPlugin(InitPluginProtocol):
                 ("logo_url", logo_url),
                 ("templates_dir", templates_dir),
                 ("middlewares", middlewares),
-                ("authentication_backend", authentication_backend),
+                ("auth_provider", auth_provider),
             ]
             if value is not Empty
         }
         self.starlette_app = Starlette()
-        self.admin = sqladmin.Admin(app=self.starlette_app, **admin_kwargs)  # type: ignore[arg-type]
+        self.admin = Admin(**admin_kwargs)  # type: ignore[arg-type]
+        self.admin.mount_to(self.starlette_app, redirect_slashes=False)
         self.starlette_app.add_middleware(PathFixMiddleware, base_url=self.admin.base_url)
         # disables redirecting based on absence/presence of trailing slashes
         self.starlette_app.router.redirect_slashes = False
-        self.admin.admin.router.redirect_slashes = False
+        print(self.admin._views)
 
     def on_app_init(self, app_config: AppConfig) -> AppConfig:
         for view in self.views:
